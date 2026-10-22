@@ -1,0 +1,15 @@
+{
+  "name": "e2e-real",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pruebas de punta a punta del Visor PACS contra el stack real (frontend + backend + Orthanc).",
+  "scripts": {
+    "test": "playwright test",
+    "test:chromium": "playwright test --project=chromium",
+    "informe": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0"
+  }
+}
