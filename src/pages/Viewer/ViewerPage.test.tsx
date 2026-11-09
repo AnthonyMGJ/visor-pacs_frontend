@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ViewerPage } from './ViewerPage';
+import { useAuthStore } from '../../store/auth.store';
 import * as dicomweb from '../../services/dicomweb.service';
 import * as estudios from '../../services/studies.service';
 import type { Serie } from '../../services/dicomweb.mapper';
@@ -73,6 +74,7 @@ describe('ViewerPage', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    useAuthStore.setState({ rol: 'MEDICO' });
     visor = visorSimulado();
     vi.spyOn(estudios, 'obtenerEstudio').mockResolvedValue(estudio);
   });
@@ -316,5 +318,55 @@ describe('ViewerPage', () => {
     unmount();
     await act(async () => listo(visor.motor));
     expect(visor.motor.destruir).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ViewerPage en modo consulta (paciente)', () => {
+  let visor: Visor;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    useAuthStore.setState({ rol: 'PACIENTE' });
+    visor = visorSimulado();
+    vi.spyOn(estudios, 'obtenerEstudio').mockResolvedValue(estudio);
+  });
+
+  it('el paciente solo ve desplazar, zoom, mover y restablecer', async () => {
+    vi.spyOn(dicomweb, 'listarSeries').mockResolvedValue([serie('S1', 1, 'AXIAL')]);
+    vi.spyOn(dicomweb, 'cargarSerie').mockResolvedValue(carga(180));
+    montar(visor.crear);
+    await waitFor(() => expect(visor.motor.mostrarSerie).toHaveBeenCalledTimes(1));
+
+    for (const nombre of ['Desplazar serie', 'Zoom', 'Mover imagen', 'Restablecer']) {
+      expect(screen.getByRole('button', { name: nombre })).toBeInTheDocument();
+    }
+    for (const nombre of [
+      'Ventana y nivel', 'Medir distancia', 'Medir ángulo', 'Rotar a la izquierda', 'Rotar a la derecha',
+      'Voltear horizontal', 'Voltear vertical', 'Invertir colores', 'Borrar mediciones',
+    ]) {
+      expect(screen.queryByRole('button', { name: nombre })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByLabelText('Ventana')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Nivel')).not.toBeInTheDocument();
+  });
+
+  it('con una imagen suelta el paciente empieza en "zoom", nunca en "ventana y nivel"', async () => {
+    vi.spyOn(dicomweb, 'listarSeries').mockResolvedValue([serie('S1', 1, 'TORAX PA', 1)]);
+    vi.spyOn(dicomweb, 'cargarSerie').mockResolvedValue(carga(1));
+    montar(visor.crear);
+    await waitFor(() => expect(visor.motor.mostrarSerie).toHaveBeenCalledTimes(1));
+    expect(visor.motor.seleccionarHerramienta).toHaveBeenCalledWith('zoom');
+    expect(visor.motor.seleccionarHerramienta).not.toHaveBeenCalledWith('ventana');
+    expect(screen.getByRole('button', { name: 'Zoom' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('sin rol en la sesión el visor queda en modo consulta (falla cerrado)', async () => {
+    useAuthStore.setState({ rol: null });
+    vi.spyOn(dicomweb, 'listarSeries').mockResolvedValue([serie('S1', 1, 'AXIAL')]);
+    vi.spyOn(dicomweb, 'cargarSerie').mockResolvedValue(carga(2));
+    montar(visor.crear);
+    await waitFor(() => expect(visor.motor.mostrarSerie).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: 'Medir distancia' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Ventana')).not.toBeInTheDocument();
   });
 });

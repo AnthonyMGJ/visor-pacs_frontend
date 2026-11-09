@@ -23,8 +23,10 @@ import { mensajeDeError } from '../../services/auth.service';
 import type { Serie } from '../../services/dicomweb.mapper';
 import { cargarSerie, listarSeries } from '../../services/dicomweb.service';
 import { obtenerEstudio } from '../../services/studies.service';
+import { useAuthStore } from '../../store/auth.store';
 import type { Study } from '../../services/studies.mapper';
 import type { CrearMotor, EstadoVisor, Herramienta, MotorVisor } from '../../viewer/tipos';
+import { herramientaInicial, permisosDelVisor, puedeUsar } from '../../viewer/permisos';
 import { formatearNumero, leerNumero, rangoDeVentana, validarVentanaNivel } from '../../viewer/ventana';
 
 interface Props {
@@ -71,6 +73,9 @@ function etiquetaDeSerie(s: Serie): string {
 export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => {
   const { studyId = '' } = useParams<{ studyId: string }>();
   const navigate = useNavigate();
+  // El paciente solo consulta la imagen; el médico usa todas las herramientas (ver viewer/permisos.ts).
+  const rol = useAuthStore((s) => s.rol);
+  const permisos = permisosDelVisor(rol);
 
   const contenedor = useRef<HTMLDivElement>(null);
   const lienzo = useRef<HTMLDivElement>(null);
@@ -84,7 +89,7 @@ export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => 
   const [serieActiva, setSerieActiva] = useState<string | null>(null);
   const [cargandoSerie, setCargandoSerie] = useState(false);
   const [error, setError] = useState('');
-  const [herramienta, setHerramienta] = useState<Herramienta>('ventana');
+  const [herramienta, setHerramienta] = useState<Herramienta>(() => herramientaInicial(permisos, 1));
   const [estado, setEstado] = useState<EstadoVisor | null>(null);
 
   const [textoVentana, setTextoVentana] = useState('');
@@ -175,7 +180,7 @@ export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => 
           setError('La serie no tiene imágenes.');
           return;
         }
-        const inicial: Herramienta = carga.imageIds.length > 1 ? 'desplazar' : 'ventana';
+        const inicial = herramientaInicial(permisos, carga.imageIds.length);
         setHerramienta(inicial);
         m.seleccionarHerramienta(inicial);
         await m.mostrarSerie(carga);
@@ -185,7 +190,7 @@ export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => 
         if (id === peticion.current) setCargandoSerie(false);
       }
     },
-    [studyId],
+    [studyId, permisos],
   );
 
   // Con una sola serie no hay nada que elegir: se abre sola. Con varias, se muestra primero la lista (CA02.4).
@@ -210,6 +215,7 @@ export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => 
     editando && validarVentanaNivel(leerNumero(textoVentana), leerNumero(textoNivel)) === null;
 
   const elegirHerramienta = (h: Herramienta) => {
+    if (!puedeUsar(permisos, h)) return;
     setHerramienta(h);
     motor.current?.seleccionarHerramienta(h);
   };
@@ -256,7 +262,7 @@ export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => 
         aria-label="Herramientas del visor"
         className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-slate-800/80 bg-[#09101d] px-3 py-2 md:flex-wrap md:overflow-x-visible"
       >
-        {HERRAMIENTAS_UI.map((h) => (
+        {HERRAMIENTAS_UI.filter((h) => puedeUsar(permisos, h.id)).map((h) => (
           <button
             key={h.id}
             type="button"
@@ -270,74 +276,84 @@ export const ViewerPage: React.FC<Props> = ({ crearMotor = crearMotorReal }) => 
             {h.icono}
           </button>
         ))}
-        <span className="mx-1 h-6 w-px shrink-0 bg-slate-700" aria-hidden="true" />
-        <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.rotar(-90)} aria-label="Rotar a la izquierda" title="Rotar a la izquierda" className={BOTON_NORMAL}>
-          <RotateCcw className="h-5 w-5" />
-        </button>
-        <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.rotar(90)} aria-label="Rotar a la derecha" title="Rotar a la derecha" className={BOTON_NORMAL}>
-          <RotateCw className="h-5 w-5" />
-        </button>
-        <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.voltear('horizontal')} aria-label="Voltear horizontal" title="Voltear horizontal" className={BOTON_NORMAL}>
-          <FlipHorizontal2 className="h-5 w-5" />
-        </button>
-        <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.voltear('vertical')} aria-label="Voltear vertical" title="Voltear vertical" className={BOTON_NORMAL}>
-          <FlipVertical2 className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          disabled={!puedeUsarHerramientas}
-          onClick={() => motor.current?.invertir()}
-          aria-label="Invertir colores"
-          aria-pressed={estado?.invertida === true}
-          title="Invertir colores"
-          className={estado?.invertida ? BOTON_ACTIVO : BOTON_NORMAL}
-        >
-          <Contrast className="h-5 w-5" />
-        </button>
-        <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.borrarMediciones()} aria-label="Borrar mediciones" title="Borrar mediciones" className={BOTON_NORMAL}>
-          <Eraser className="h-5 w-5" />
-        </button>
+        {permisos.ajustarImagen && (
+          <>
+            <span className="mx-1 h-6 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+            <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.rotar(-90)} aria-label="Rotar a la izquierda" title="Rotar a la izquierda" className={BOTON_NORMAL}>
+              <RotateCcw className="h-5 w-5" />
+            </button>
+            <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.rotar(90)} aria-label="Rotar a la derecha" title="Rotar a la derecha" className={BOTON_NORMAL}>
+              <RotateCw className="h-5 w-5" />
+            </button>
+            <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.voltear('horizontal')} aria-label="Voltear horizontal" title="Voltear horizontal" className={BOTON_NORMAL}>
+              <FlipHorizontal2 className="h-5 w-5" />
+            </button>
+            <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.voltear('vertical')} aria-label="Voltear vertical" title="Voltear vertical" className={BOTON_NORMAL}>
+              <FlipVertical2 className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              disabled={!puedeUsarHerramientas}
+              onClick={() => motor.current?.invertir()}
+              aria-label="Invertir colores"
+              aria-pressed={estado?.invertida === true}
+              title="Invertir colores"
+              className={estado?.invertida ? BOTON_ACTIVO : BOTON_NORMAL}
+            >
+              <Contrast className="h-5 w-5" />
+            </button>
+          </>
+        )}
+        {permisos.medir && (
+          <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.borrarMediciones()} aria-label="Borrar mediciones" title="Borrar mediciones" className={BOTON_NORMAL}>
+            <Eraser className="h-5 w-5" />
+          </button>
+        )}
         <button type="button" disabled={!puedeUsarHerramientas} onClick={() => motor.current?.restablecer()} aria-label="Restablecer" title="Restablecer" className={BOTON_NORMAL}>
           <RefreshCw className="h-5 w-5" />
           <span className="hidden md:inline">Restablecer</span>
         </button>
-        <span className="mx-1 h-6 w-px shrink-0 bg-slate-700" aria-hidden="true" />
-        <label className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-400">
-          Ventana
-          <input
-            inputMode="decimal"
-            aria-label="Ventana"
-            value={textoVentana}
-            disabled={!hayImagen}
-            onFocus={() => setEditando(true)}
-            onBlur={() => setEditando(false)}
-            onChange={(e) => {
-              setTextoVentana(e.target.value);
-              aplicarValores(e.target.value, textoNivel);
-            }}
-            className="h-11 w-20 rounded-lg border border-slate-700 bg-[#0d1522] px-2 text-center font-mono text-xs text-slate-100 outline-none focus:border-sky-400 disabled:opacity-40"
-          />
-        </label>
-        <label className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-400">
-          Nivel
-          <input
-            inputMode="decimal"
-            aria-label="Nivel"
-            value={textoNivel}
-            disabled={!hayImagen}
-            onFocus={() => setEditando(true)}
-            onBlur={() => setEditando(false)}
-            onChange={(e) => {
-              setTextoNivel(e.target.value);
-              aplicarValores(textoVentana, e.target.value);
-            }}
-            className="h-11 w-20 rounded-lg border border-slate-700 bg-[#0d1522] px-2 text-center font-mono text-xs text-slate-100 outline-none focus:border-sky-400 disabled:opacity-40"
-          />
-        </label>
-        {valoresInvalidos && (
-          <span role="status" className="shrink-0 text-[11px] text-amber-300">
-            La ventana debe ser mayor que 0.
-          </span>
+        {permisos.ajustarImagen && (
+          <>
+            <span className="mx-1 h-6 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+            <label className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+              Ventana
+              <input
+                inputMode="decimal"
+                aria-label="Ventana"
+                value={textoVentana}
+                disabled={!hayImagen}
+                onFocus={() => setEditando(true)}
+                onBlur={() => setEditando(false)}
+                onChange={(e) => {
+                  setTextoVentana(e.target.value);
+                  aplicarValores(e.target.value, textoNivel);
+                }}
+                className="h-11 w-20 rounded-lg border border-slate-700 bg-[#0d1522] px-2 text-center font-mono text-xs text-slate-100 outline-none focus:border-sky-400 disabled:opacity-40"
+              />
+            </label>
+            <label className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-400">
+              Nivel
+              <input
+                inputMode="decimal"
+                aria-label="Nivel"
+                value={textoNivel}
+                disabled={!hayImagen}
+                onFocus={() => setEditando(true)}
+                onBlur={() => setEditando(false)}
+                onChange={(e) => {
+                  setTextoNivel(e.target.value);
+                  aplicarValores(textoVentana, e.target.value);
+                }}
+                className="h-11 w-20 rounded-lg border border-slate-700 bg-[#0d1522] px-2 text-center font-mono text-xs text-slate-100 outline-none focus:border-sky-400 disabled:opacity-40"
+              />
+            </label>
+            {valoresInvalidos && (
+              <span role="status" className="shrink-0 text-[11px] text-amber-300">
+                La ventana debe ser mayor que 0.
+              </span>
+            )}
+          </>
         )}
       </div>
 
